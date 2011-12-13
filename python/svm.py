@@ -3,17 +3,20 @@
 from ctypes import *
 from ctypes.util import find_library
 import sys
+import os
 
 # For unix the prefix 'lib' is not considered.
 if find_library('svm'):
 	libsvm = CDLL(find_library('svm'))
 elif find_library('libsvm'):
 	libsvm = CDLL(find_library('libsvm'))
-else  :
+else:
 	if sys.platform == 'win32':
-		libsvm = CDLL('../windows/libsvm.dll')
-	else :
-		libsvm = CDLL('../libsvm.so.1')
+		libsvm = CDLL(os.path.join(os.path.dirname(__file__),\
+				'../windows/libsvm.dll'))
+	else:
+		libsvm = CDLL(os.path.join(os.path.dirname(__file__),\
+				'../libsvm.so.2'))
 
 # Construct constants
 SVM_TYPE = ['C_SVC', 'NU_SVC', 'ONE_CLASS', 'EPSILON_SVR', 'NU_SVR' ]
@@ -42,13 +45,13 @@ def gen_svm_nodearray(xi, feature_max=None, issparse=None):
 		index_range = xi.keys()
 	elif isinstance(xi, (list, tuple)):
 		index_range = range(len(xi))
-	else :
+	else:
 		raise TypeError('xi should be a dictionary, list or tuple')
 
-	if feature_max :
+	if feature_max:
 		assert(isinstance(feature_max, int))
 		index_range = filter(lambda j: j <= feature_max, index_range)
-	if issparse : 
+	if issparse: 
 		index_range = filter(lambda j:xi[j] != 0, index_range)
 
 	index_range = sorted(index_range)
@@ -68,7 +71,7 @@ class svm_problem(Structure):
 	_fields_ = genFields(_names, _types)
 
 	def __init__(self, y, x):
-		if len(y) != len(x) :
+		if len(y) != len(x):
 			raise ValueError("len(y) != len(x)")
 		self.l = l = len(y)
 
@@ -81,7 +84,7 @@ class svm_problem(Structure):
 		self.n = max_idx
 
 		self.y = (c_double * l)()
-		for i, yi in enumerate(y): self.y[i] = y[i]
+		for i, yi in enumerate(y): self.y[i] = yi
 
 		self.x = (POINTER(svm_node) * l)() 
 		for i, xi in enumerate(self.x_space): self.x[i] = xi
@@ -134,7 +137,7 @@ class svm_parameter(Structure):
 		weight = []
 
 		i = 0
-		while i < len(argv) :
+		while i < len(argv):
 			if argv[i] == "-s":
 				i = i + 1
 				self.svm_type = int(argv[i])
@@ -177,7 +180,7 @@ class svm_parameter(Structure):
 				i = i + 1
 				self.cross_validation = 1
 				self.nr_fold = int(argv[i])
-				if self.nr_fold < 2 :
+				if self.nr_fold < 2:
 					raise ValueError("n-fold cross validation: n must >= 2")
 			elif argv[i].startswith("-w"):
 				i = i + 1
@@ -197,13 +200,21 @@ class svm_parameter(Structure):
 			self.weight_label[i] = weight_label[i]
 
 class svm_model(Structure):
+	_names = ['param', 'nr_class', 'l', 'SV', 'sv_coef', 'rho',
+			'probA', 'probB', 'label', 'nSV', 'free_sv']
+	_types = [svm_parameter, c_int, c_int, POINTER(POINTER(svm_node)),
+			POINTER(POINTER(c_double)), POINTER(c_double),
+			POINTER(c_double), POINTER(c_double), POINTER(c_int),
+			POINTER(c_int), c_int]
+	_fields_ = genFields(_names, _types)
+
 	def __init__(self):
 		self.__createfrom__ = 'python'
 
 	def __del__(self):
 		# free memory created by C to avoid memory leak
 		if hasattr(self, '__createfrom__') and self.__createfrom__ == 'C':
-			libsvm.svm_destroy_model(self)
+			libsvm.svm_free_and_destroy_model(pointer(self))
 
 	def get_svm_type(self):
 		return libsvm.svm_get_svm_type(self)
@@ -222,6 +233,25 @@ class svm_model(Structure):
 
 	def is_probability_model(self):
 		return (libsvm.svm_check_probability_model(self) == 1)
+
+	def get_sv_coef(self):
+		return [tuple(self.sv_coef[j][i] for j in xrange(self.nr_class - 1))
+				for i in xrange(self.l)]
+
+	def get_SV(self):
+		result = []
+		for sparse_sv in self.SV[:self.l]:
+			row = dict()
+			
+			i = 0
+			while True:
+				row[sparse_sv[i].index] = sparse_sv[i].value
+				if sparse_sv[i].index == -1:
+					break
+				i += 1
+
+			result.append(row)
+		return result
 
 def toPyModel(model_ptr):
 	"""
@@ -250,7 +280,8 @@ fillprototype(libsvm.svm_predict_values, c_double, [POINTER(svm_model), POINTER(
 fillprototype(libsvm.svm_predict, c_double, [POINTER(svm_model), POINTER(svm_node)])
 fillprototype(libsvm.svm_predict_probability, c_double, [POINTER(svm_model), POINTER(svm_node), POINTER(c_double)])
 
-fillprototype(libsvm.svm_destroy_model, None, [POINTER(svm_model)])
+fillprototype(libsvm.svm_free_model_content, None, [POINTER(svm_model)])
+fillprototype(libsvm.svm_free_and_destroy_model, None, [POINTER(POINTER(svm_model))])
 fillprototype(libsvm.svm_destroy_param, None, [POINTER(svm_parameter)])
 
 fillprototype(libsvm.svm_check_parameter, c_char_p, [POINTER(svm_problem), POINTER(svm_parameter)])

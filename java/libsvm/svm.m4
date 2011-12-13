@@ -128,7 +128,7 @@ class Cache {
 //
 abstract class QMatrix {
 	abstract Qfloat[] get_Q(int column, int len);
-	abstract Qfloat[] get_QD();
+	abstract double[] get_QD();
 	abstract void swap_index(int i, int j);
 };
 
@@ -143,7 +143,7 @@ abstract class Kernel extends QMatrix {
 	private final double coef0;
 
 	abstract Qfloat[] get_Q(int column, int len);
-	abstract Qfloat[] get_QD();
+	abstract double[] get_QD();
 
 	void swap_index(int i, int j)
 	{
@@ -309,7 +309,7 @@ class Solver {
 	byte[] alpha_status;	// LOWER_BOUND, UPPER_BOUND, FREE
 	double[] alpha;
 	QMatrix Q;
-	Qfloat[] QD;
+	double[] QD;
 	double eps;
 	double Cp,Cn;
 	double[] p;
@@ -375,7 +375,7 @@ class Solver {
 				nr_free++;
 
 		if(2*nr_free < active_size)
-			svm.info("\nWarning: using -h 0 may be faster\n");
+			svm.info("\nWARNING: using -h 0 may be faster\n");
 
 		if (nr_free*l > 2*active_size*(l-active_size))
 		{
@@ -456,10 +456,11 @@ class Solver {
 		// optimization step
 
 		int iter = 0;
+		int max_iter = Math.max(10000000, l>Integer.MAX_VALUE/100 ? Integer.MAX_VALUE : 100*l);
 		int counter = Math.min(l,1000)+1;
 		int[] working_set = new int[2];
 
-		while(true)
+		while(iter < max_iter)
 		{
 			// show progress and do shrinking
 
@@ -501,7 +502,7 @@ class Solver {
 
 			if(y[i]!=y[j])
 			{
-				double quad_coef = Q_i[i]+Q_j[j]+2*Q_i[j];
+				double quad_coef = QD[i]+QD[j]+2*Q_i[j];
 				if (quad_coef <= 0)
 					quad_coef = TAU;
 				double delta = (-G[i]-G[j])/quad_coef;
@@ -544,7 +545,7 @@ class Solver {
 			}
 			else
 			{
-				double quad_coef = Q_i[i]+Q_j[j]-2*Q_i[j];
+				double quad_coef = QD[i]+QD[j]-2*Q_i[j];
 				if (quad_coef <= 0)
 					quad_coef = TAU;
 				double delta = (G[i]-G[j])/quad_coef;
@@ -628,6 +629,18 @@ class Solver {
 			}
 
 		}
+		
+		if(iter >= max_iter)
+		{
+			if(active_size < l)
+			{
+				// reconstruct the whole gradient to calculate objective value
+				reconstruct_gradient();
+				active_size = l;
+				svm.info("*");
+			}
+			svm.info("\nWARNING: reaching max number of iterations");
+		}
 
 		// calculate rho
 
@@ -707,7 +720,7 @@ class Solver {
 					if (grad_diff > 0)
 					{
 						double obj_diff; 
-						double quad_coef=Q_i[i]+QD[j]-2.0*y[i]*Q_i[j];
+						double quad_coef = QD[i]+QD[j]-2.0*y[i]*Q_i[j];
 						if (quad_coef > 0)
 							obj_diff = -(grad_diff*grad_diff)/quad_coef;
 						else
@@ -731,7 +744,7 @@ class Solver {
 					if (grad_diff > 0)
 					{
 						double obj_diff; 
-						double quad_coef=Q_i[i]+QD[j]+2.0*y[i]*Q_i[j];
+						double quad_coef = QD[i]+QD[j]+2.0*y[i]*Q_i[j];
 						if (quad_coef > 0)
 							obj_diff = -(grad_diff*grad_diff)/quad_coef;
 						else
@@ -953,7 +966,7 @@ final class Solver_NU extends Solver
 					if (grad_diff > 0)
 					{
 						double obj_diff; 
-						double quad_coef = Q_ip[ip]+QD[j]-2*Q_ip[j];
+						double quad_coef = QD[ip]+QD[j]-2*Q_ip[j];
 						if (quad_coef > 0)
 							obj_diff = -(grad_diff*grad_diff)/quad_coef;
 						else
@@ -977,7 +990,7 @@ final class Solver_NU extends Solver
 					if (grad_diff > 0)
 					{
 						double obj_diff; 
-						double quad_coef = Q_in[in]+QD[j]-2*Q_in[j];
+						double quad_coef = QD[in]+QD[j]-2*Q_in[j];
 						if (quad_coef > 0)
 							obj_diff = -(grad_diff*grad_diff)/quad_coef;
 						else
@@ -1135,16 +1148,16 @@ class SVC_Q extends Kernel
 {
 	private final byte[] y;
 	private final Cache cache;
-	private final Qfloat[] QD;
+	private final double[] QD;
 
 	SVC_Q(svm_problem prob, svm_parameter param, byte[] y_)
 	{
 		super(prob.l, prob.x, param);
 		y = (byte[])y_.clone();
 		cache = new Cache(prob.l,(long)(param.cache_size*(1<<20)));
-		QD = new Qfloat[prob.l];
+		QD = new double[prob.l];
 		for(int i=0;i<prob.l;i++)
-			QD[i]= (Qfloat)kernel_function(i,i);
+			QD[i] = kernel_function(i,i);
 	}
 
 	Qfloat[] get_Q(int i, int len)
@@ -1159,7 +1172,7 @@ class SVC_Q extends Kernel
 		return data[0];
 	}
 
-	Qfloat[] get_QD()
+	double[] get_QD()
 	{
 		return QD;
 	}
@@ -1169,22 +1182,22 @@ class SVC_Q extends Kernel
 		cache.swap_index(i,j);
 		super.swap_index(i,j);
 		swap(byte,y[i],y[j]);
-		swap(Qfloat,QD[i],QD[j]);
+		swap(double,QD[i],QD[j]);
 	}
 }
 
 class ONE_CLASS_Q extends Kernel
 {
 	private final Cache cache;
-	private final Qfloat[] QD;
+	private final double[] QD;
 
 	ONE_CLASS_Q(svm_problem prob, svm_parameter param)
 	{
 		super(prob.l, prob.x, param);
 		cache = new Cache(prob.l,(long)(param.cache_size*(1<<20)));
-		QD = new Qfloat[prob.l];
+		QD = new double[prob.l];
 		for(int i=0;i<prob.l;i++)
-			QD[i]= (Qfloat)kernel_function(i,i);
+			QD[i] = kernel_function(i,i);
 	}
 
 	Qfloat[] get_Q(int i, int len)
@@ -1199,7 +1212,7 @@ class ONE_CLASS_Q extends Kernel
 		return data[0];
 	}
 
-	Qfloat[] get_QD()
+	double[] get_QD()
 	{
 		return QD;
 	}
@@ -1208,7 +1221,7 @@ class ONE_CLASS_Q extends Kernel
 	{
 		cache.swap_index(i,j);
 		super.swap_index(i,j);
-		swap(Qfloat,QD[i],QD[j]);
+		swap(double,QD[i],QD[j]);
 	}
 }
 
@@ -1220,14 +1233,14 @@ class SVR_Q extends Kernel
 	private final int[] index;
 	private int next_buffer;
 	private Qfloat[][] buffer;
-	private final Qfloat[] QD;
+	private final double[] QD;
 
 	SVR_Q(svm_problem prob, svm_parameter param)
 	{
 		super(prob.l, prob.x, param);
 		l = prob.l;
 		cache = new Cache(l,(long)(param.cache_size*(1<<20)));
-		QD = new Qfloat[2*l];
+		QD = new double[2*l];
 		sign = new byte[2*l];
 		index = new int[2*l];
 		for(int k=0;k<l;k++)
@@ -1236,7 +1249,7 @@ class SVR_Q extends Kernel
 			sign[k+l] = -1;
 			index[k] = k;
 			index[k+l] = k;
-			QD[k] = (Qfloat)kernel_function(k,k);
+			QD[k] = kernel_function(k,k);
 			QD[k+l] = QD[k];
 		}
 		buffer = new Qfloat[2][2*l];
@@ -1247,7 +1260,7 @@ class SVR_Q extends Kernel
 	{
 		swap(byte,sign[i],sign[j]);
 		swap(int,index[i],index[j]);
-		swap(Qfloat,QD[i],QD[j]);
+		swap(double,QD[i],QD[j]);
 	}
 
 	Qfloat[] get_Q(int i, int len)
@@ -1269,7 +1282,7 @@ class SVR_Q extends Kernel
 		return buf;
 	}
 
-	Qfloat[] get_QD()
+	double[] get_QD()
 	{
 		return QD;
 	}
@@ -1279,7 +1292,8 @@ public class svm {
 	//
 	// construct and solve various formulations
 	//
-	public static final int LIBSVM_VERSION=291; 
+	public static final int LIBSVM_VERSION=311; 
+	public static final Random rand = new Random();
 
 	private static svm_print_interface svm_print_stdout = new svm_print_interface()
 	{
@@ -1311,7 +1325,7 @@ public class svm {
 		{
 			alpha[i] = 0;
 			minus_ones[i] = -1;
-			if(prob.y[i] > 0) y[i] = +1; else y[i]=-1;
+			if(prob.y[i] > 0) y[i] = +1; else y[i] = -1;
 		}
 
 		Solver s = new Solver();
@@ -1669,7 +1683,7 @@ public class svm {
 		int t,j;
 		int iter = 0, max_iter=Math.max(100,k);
 		double[][] Q=new double[k][k];
-		double[] Qp= new double[k];
+		double[] Qp=new double[k];
 		double pQp, eps=0.005/k;
 	
 		for (t=0;t<k;t++)
@@ -1735,7 +1749,7 @@ public class svm {
 		for(i=0;i<prob.l;i++) perm[i]=i;
 		for(i=0;i<prob.l;i++)
 		{
-			int j = i+(int)(Math.random()*(prob.l-i));
+			int j = i+rand.nextInt(prob.l-i);
 			swap(int,perm[i],perm[j]);
 		}
 		for(i=0;i<nr_fold;i++)
@@ -1959,6 +1973,10 @@ public class svm {
 			int[] label = tmp_label[0];
 			int[] start = tmp_start[0];
 			int[] count = tmp_count[0];
+ 			
+			if(nr_class == 1) 
+				svm.info("WARNING: training data in only one class. See README for details.\n");
+			
 			svm_node[][] x = new svm_node[l][];
 			int i;
 			for(i=0;i<l;i++)
@@ -1976,7 +1994,7 @@ public class svm {
 					if(param.weight_label[i] == label[j])
 						break;
 				if(j == nr_class)
-					System.err.print("warning: class label "+param.weight_label[i]+" specified in weight is not found\n");
+					System.err.print("WARNING: class label "+param.weight_label[i]+" specified in weight is not found\n");
 				else
 					weighted_C[j] *= param.weight[i];
 			}
@@ -2157,7 +2175,7 @@ public class svm {
 			for (c=0; c<nr_class; c++)
 				for(i=0;i<count[c];i++)
 				{
-					int j = i+(int)(Math.random()*(count[c]-i));
+					int j = i+rand.nextInt(count[c]-i);
 					swap(int,index[start[c]+j],index[start[c]+i]);
 				}
 			for(i=0;i<nr_fold;i++)
@@ -2189,7 +2207,7 @@ public class svm {
 			for(i=0;i<l;i++) perm[i]=i;
 			for(i=0;i<l;i++)
 			{
-				int j = i+(int)(Math.random()*(l-i));
+				int j = i+rand.nextInt(l-i);
 				swap(int,perm[i],perm[j]);
 			}
 			for(i=0;i<=nr_fold;i++)
@@ -2266,13 +2284,14 @@ public class svm {
 
 	public static double svm_predict_values(svm_model model, svm_node[] x, double[] dec_values)
 	{
+		int i;
 		if(model.param.svm_type == svm_parameter.ONE_CLASS ||
 		   model.param.svm_type == svm_parameter.EPSILON_SVR ||
 		   model.param.svm_type == svm_parameter.NU_SVR)
 		{
 			double[] sv_coef = model.sv_coef[0];
 			double sum = 0;
-			for(int i=0;i<model.l;i++)
+			for(i=0;i<model.l;i++)
 				sum += sv_coef[i] * Kernel.k_function(x,model.SV[i],model.param);
 			sum -= model.rho[0];
 			dec_values[0] = sum;
@@ -2284,7 +2303,6 @@ public class svm {
 		}
 		else
 		{
-			int i;
 			int nr_class = model.nr_class;
 			int l = model.l;
 		

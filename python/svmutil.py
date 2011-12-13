@@ -26,7 +26,7 @@ def svm_read_problem(data_file_name):
 
 def svm_load_model(model_file_name):
 	"""
-	svm_model_model(model_file_name) -> model
+	svm_load_model(model_file_name) -> model
 	
 	Load a LIBSVM model from model_file_name and return.
 	"""
@@ -41,7 +41,7 @@ def svm_save_model(model_file_name, model):
 	"""
 	svm_save_model(model_file_name, model) -> None
 
-	Save a LIBSVM model model to the file model_file_name.
+	Save a LIBSVM model to the file model_file_name.
 	"""
 	libsvm.svm_save_model(model_file_name, model)
 
@@ -112,8 +112,8 @@ def svm_train(arg1, arg2=None, arg3=None):
 	    -q : quiet mode (no outputs)
 	"""
 	prob, param = None, None
-	if isinstance(arg1,(list,tuple)):
-		assert isinstance(arg2, list)
+	if isinstance(arg1, (list, tuple)):
+		assert isinstance(arg2, (list, tuple))
 		y, x, options = arg1, arg2, arg3
 		prob = svm_problem(y, x)
 		param = svm_parameter(options)
@@ -139,7 +139,7 @@ def svm_train(arg1, arg2=None, arg3=None):
 	libsvm.svm_set_print_string_function(param.print_func)
 	err_msg = libsvm.svm_check_parameter(prob, param)
 	if err_msg:
-		raise ValueError('Error: %s' % toPyString(err_msg))
+		raise ValueError('Error: %s' % err_msg)
 
 	if param.cross_validation:
 		l, nr_fold = prob.l, param.nr_fold
@@ -215,18 +215,21 @@ def svm_predict(y, x, m, options=""):
 			values = prob_estimates[:nr_class]
 			pred_labels += [label]
 			pred_values += [values]
-	else :
+	else:
 		if is_prob_model:
 			print("Model supports probability estimates, but disabled in predicton.")
 		if svm_type in (ONE_CLASS, EPSILON_SVR, NU_SVC):
 			nr_classifier = 1
-		else :
+		else:
 			nr_classifier = nr_class*(nr_class-1)//2
 		dec_values = (c_double * nr_classifier)()
 		for xi in x:
 			xi, idx = gen_svm_nodearray(xi)
 			label = libsvm.svm_predict_values(m, xi, dec_values)
-			values = dec_values[:nr_classifier]
+			if(nr_class == 1): 
+				values = [1]
+			else: 
+				values = dec_values[:nr_classifier]
 			pred_labels += [label]
 			pred_values += [values]
 
